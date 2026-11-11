@@ -20,6 +20,8 @@ Firmware cho thiết bị đeo theo dõi sức khỏe và phát hiện té ngã 
   - Lọc trung vị và tính toán BPM thời gian thực; tự động phát hiện tháo đồng hồ để tắt LED tiết kiệm pin.
 - **Sàng lọc rung nhĩ (AFib Screening)**:
   - Chu kỳ sàng lọc đa pha kéo dài 10 phút, tự động kích hoạt định kỳ khi người dùng đeo đồng hồ ở trạng thái nghỉ.
+  - Pha 1 phát PPG thô liên tục trong **75 giây** (`SCREENING_PHASE1_MS`) để app ghi đủ 72 giây: AI Service bỏ 2 giây đầu rồi chia 70 giây còn lại thành 5 cửa sổ 30 s, bước 10 s.
+  - Mỗi mẫu PPG mang **cờ cử động** từ IMU LSM6DS3TR-C (`AccelManager_isMoving`, đọc tối đa 10 lần/giây). App lưu cờ vào cột `Motion` của CSV; cờ không dừng phép đo.
 - **Chế độ tập luyện (Workout Mode)**:
   - Đếm bước chân thông minh bằng thuật toán nhận diện đỉnh gia tốc $25\text{ Hz}$.
   - Gói tin gọn nhẹ gửi định kỳ mỗi $1 - 3\text{ giây}$ lên ứng dụng di động.
@@ -75,45 +77,48 @@ Thiết bị sử dụng vi điều khiển **Nordic nRF52840** (ARM Cortex-M4F 
 | **Watch $\rightarrow$ App** | `SOS:ALERT,FALL,ACTIVE,...` | Luồng dữ liệu sinh hiệu khẩn cấp định kỳ kèm nhịp tim & SpO2 |
 | **Watch $\rightarrow$ App** | `SOS:CANCELLED[,reason]\n` | Báo hủy SOS (lý do: `BUTTON`, `NO_WEAR` hoặc từ app) |
 | **Watch $\rightarrow$ App** | `W:<timestamp>,<bpm>,<steps>\n`| Báo cáo nhịp tim và bước chân định kỳ trong chế độ tập luyện |
+| **Watch $\rightarrow$ App** (DATA) | `<millis>,<red>,<ir>,<bpm>,<spo2>,<motion>\n` | Mẫu PPG thô ở chế độ Measure/Screening (gom 5 mẫu/gói); `motion` = 1 khi IMU phát hiện cử động |
 
 ---
 
 ## 🚀 Hướng dẫn nạp Firmware
 
 ### Cách 1: Nạp siêu tốc bằng kéo-thả file `.uf2` (Khuyên dùng)
-Bạn không cần mở Arduino IDE hay cài đặt thư viện:
+Bạn không cần cài công cụ biên dịch hay thư viện (file `.uf2` được tạo từ bản build PlatformIO, xem Cách 2):
 1. Kết nối XIAO nRF52840 Sense với máy tính qua cáp USB Type-C.
 2. Dùng nhíp hoặc que nhỏ **bấm nhanh nút RESET trên mạch 2 lần liên tiếp** (Double-click).
 3. Máy tính sẽ xuất hiện ổ đĩa USB mới mang tên **`XIAO-SENSE`** (hoặc `XIAO-BLE`).
 4. Kéo thả file **[`HealthSense-Firmware-XIAO-nRF52840.uf2`](HealthSense-Firmware-XIAO-nRF52840.uf2)** vào ổ đĩa đó.
 5. Ổ đĩa sẽ tự đóng và mạch tự động khởi động chạy firmware mới trong vòng 2 giây!
 
-### Cách 2: Biên dịch qua Arduino IDE
-1. Cài đặt **Arduino IDE 2.x**.
-2. Thêm URL Bo mạch Seeed Studio vào *Preferences $\rightarrow$ Additional Board Manager URLs*:
-   ```text
-   https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
+### Cách 2: Biên dịch bằng PlatformIO
+Dự án dùng PlatformIO với framework Arduino (core Adafruit nRF52 của Seeed, SoftDevice S140). Board, platform và phiên bản thư viện đều được ghim trong [`platformio.ini`](platformio.ini):
+- platform `Seeed-Studio/platform-seeedboards` 1.1.1, board `seeed-xiao-afruitnrf52-nrf52840-sense`;
+- `Seeed Arduino LSM6DS3` 2.0.8, `SparkFun MAX3010x Pulse and Proximity Sensor Library` 1.1.2, `Adafruit Unified Sensor` 1.1.15 (Bluefruit và TinyUSB có sẵn trong core).
+
+Các bước:
+1. Cài **PlatformIO** (extension cho VS Code hoặc `pip install platformio`).
+2. Ở thư mục gốc repo, chạy `pio run` để biên dịch (lần đầu PlatformIO tự tải toolchain, core và thư viện).
+3. Nạp qua USB: `pio run -t upload`. Xem log: `pio device monitor` (115200 baud).
+4. Tạo lại file `.uf2` từ bản build:
+   ```bash
+   python ~/.platformio/packages/framework-arduinoadafruitnrf52/tools/uf2conv/uf2conv.py .pio/build/xiao_nrf52840_sense/firmware.hex -c -f 0xADA52840 -o HealthSense-Firmware-XIAO-nRF52840.uf2
    ```
-3. Vào *Boards Manager*, tìm và cài đặt gói: **Seeeduino nRF52 Boards** (chọn bo mạch: **Seeed XIAO nRF52840 Sense**).
-4. Cài đặt các thư viện cần thiết qua Library Manager:
-   - `Seeed Arduino LSM6DS3`
-   - `SparkFun MAX3010x Pulse and Proximity Sensor Library`
-   - `Adafruit Bluefruit nRF52 Libraries`
-5. Mở file [`HealthSense-Firmware-XIAO-nRF52840.ino`](HealthSense-Firmware-XIAO-nRF52840.ino), chọn cổng COM tương ứng và bấm **Upload**.
 
 ---
 
 ## 📂 Cấu trúc mã nguồn
 
 ```text
-├── HealthSense-Firmware-XIAO-nRF52840.ino   # File sketch chính (setup, loop & điều phối sự kiện)
+├── platformio.ini                           # Cấu hình PlatformIO: board, platform, thư viện (đã ghim phiên bản)
 ├── HealthSense-Firmware-XIAO-nRF52840.uf2   # File binary nạp sẵn dạng USB Drag & Drop
-├── AccelManager.h / .cpp                    # Trình điều khiển LSM6DS3TR-C, đếm bước & FSM té ngã 3 giai đoạn
-├── PPGManager.h / .cpp                      # Trình điều khiển MAX30101, thuật toán nhịp tim, SpO2 & dò đeo tay
-├── BLEManager.h / .cpp                      # Quản lý Bluetooth Low Energy GATT, kết nối & truyền nhận gói tin
-├── DeviceStateManager.h / .cpp              # Máy trạng thái hữu hạn (FSM), xử lý chuỗi khẩn cấp SOS & quản lý nguồn
-├── DisplayPower.h / .cpp                    # Trình điều khiển đèn LED RGB báo trạng thái
-└── .context/                                # Tài liệu kỹ thuật kiến trúc, sơ đồ chân & hợp đồng giao thức BLE
+└── src/
+    ├── main.cpp                             # setup, loop & điều phối sự kiện (trước là file .ino)
+    ├── AccelManager.h / .cpp                # Trình điều khiển LSM6DS3TR-C, phát hiện cử động, đếm bước & FSM té ngã 3 giai đoạn
+    ├── PPGManager.h / .cpp                  # Trình điều khiển MAX30101, thuật toán nhịp tim, SpO2, dò đeo tay & gói PPG kèm cờ cử động
+    ├── BLEManager.h / .cpp                  # Quản lý Bluetooth Low Energy GATT, kết nối & truyền nhận gói tin
+    ├── DeviceStateManager.h / .cpp          # Máy trạng thái hữu hạn (FSM), chu kỳ screening, chuỗi khẩn cấp SOS & quản lý nguồn
+    └── DisplayPower.h / .cpp                # Trình điều khiển đèn LED RGB báo trạng thái
 ```
 
 ---

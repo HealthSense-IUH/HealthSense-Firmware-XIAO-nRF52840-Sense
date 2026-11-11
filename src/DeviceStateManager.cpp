@@ -14,6 +14,11 @@ static constexpr unsigned long EMERGENCY_IR_SETTLE_MS = 1500UL;      // chờ c�
 static constexpr uint8_t EMERGENCY_NO_FINGER_CONFIRM_COUNT = 3;      // cần 3 lần thăm dò IR thấp liên tiếp (~1.5s)
 static constexpr unsigned long EMERGENCY_ALERT_INTERVAL_MS = 2000UL; // tần suất tối đa của SOS:ALERT
 
+// Thời lượng Pha 1 của chế độ Screening (phát PPG thô liên tục).
+// App ghi 72 giây (AI Service bỏ 2 giây đầu rồi chia 70 giây thành 5 cửa sổ 30 s, bước 10 s);
+// cộng thêm 3 giây dự phòng cho độ trễ lệnh BLE và thời điểm app bắt đầu ghi.
+static constexpr unsigned long SCREENING_PHASE1_MS = 75000UL;
+
 enum EmergencyType {
     EMERGENCY_NONE,
     EMERGENCY_FALL,
@@ -40,7 +45,7 @@ static bool isScreening = false;
 
 // Screening cycle management (10-minute cycle with 2 phases)
 static unsigned long screeningCycleStart = 0;
-// 0: idle, 1: Phase 1 (1 min measure), 2: Phase 1 sleep dynamic, 3: Phase 2 (30s measure), 4: Phase 2 sleep dynamic, 5: Phase 1 micro-retry wait (30s)
+// 0: idle, 1: Phase 1 (75 s measure, SCREENING_PHASE1_MS), 2: Phase 1 sleep dynamic, 3: Phase 2 (30s measure), 4: Phase 2 sleep dynamic, 5: Phase 1 micro-retry wait (30s)
 static uint8_t screeningRetryCount = 0;
 static uint8_t screeningPhase = 0;
 static unsigned long phaseStartTime = 0;
@@ -291,7 +296,7 @@ void DeviceStateManager_loop() {
         unsigned long now = millis();
         
         if (screeningPhase == 1) {
-            // ĐANG ĐO PHA 1 (1 phút)
+            // ĐANG ĐO PHA 1 (SCREENING_PHASE1_MS = 75 giây)
             // Tích luỹ BPM/SpO2 mỗi 1 giây
             if (now - lastSampleAccumTime >= 1000) {
                 lastSampleAccumTime = now;
@@ -304,8 +309,8 @@ void DeviceStateManager_loop() {
                 }
             }
             
-            // Đã đo đủ 1 phút liên tục
-            if (now - phaseStartTime >= 60000UL) {
+            // Đã đo đủ thời lượng Pha 1 liên tục
+            if (now - phaseStartTime >= SCREENING_PHASE1_MS) {
                 PPGManager_shutDown();
                 
                 uint8_t avgBPM = 0;
@@ -346,15 +351,15 @@ void DeviceStateManager_loop() {
             // ĐANG NGỦ MICRO-RETRY (30 giây)
             if (now - retrySleepStart >= 30000UL) {
                 long timeRemainingForP1 = (long)(screeningCycleStart + 150000UL) - (long)now;
-                if (timeRemainingForP1 < 60000L) {
-                    // Thời gian còn lại đến mốc Pha 2 < 60s, không đủ để đo trọn vẹn 1 phút Pha 1
-                    Serial.println("[SCREENING] Thời gian còn lại < 60s, không đủ đo trọn vẹn Pha 1. Hủy đo Pha 1 và chuyển sang chờ Pha 2...");
+                if (timeRemainingForP1 < (long)SCREENING_PHASE1_MS) {
+                    // Thời gian còn lại đến mốc Pha 2 không đủ để đo trọn vẹn Pha 1
+                    Serial.println("[SCREENING] Thời gian còn lại không đủ đo trọn vẹn Pha 1. Hủy đo Pha 1 và chuyển sang chờ Pha 2...");
                     isSpo2Missed = true;
                     screeningPhase = 2;
                     phaseSleepStart = millis();
                     phaseSleepDuration = timeRemainingForP1 > 0 ? timeRemainingForP1 : 0;
                 } else {
-                    // Đủ thời gian (>= 60s) -> Thức dậy đo lại Pha 1
+                    // Đủ thời gian (>= SCREENING_PHASE1_MS) -> Thức dậy đo lại Pha 1
                     Serial.println("[SCREENING] Hết 30 giây ngủ micro-retry. Thức dậy đo lại Pha 1...");
                     screeningPhase = 1;
                     phaseStartTime = millis();

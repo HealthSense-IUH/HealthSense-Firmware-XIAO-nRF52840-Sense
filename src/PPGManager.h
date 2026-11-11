@@ -18,6 +18,8 @@ bool PPGManager_popNoFingerEvent();
 void PPGManager_setupPhase1();
 void PPGManager_setupPhase2(bool lowPower);
 long PPGManager_readIR();
+// Cờ cử động (từ IMU) gắn vào cột thứ 6 của mỗi mẫu PPG gửi qua BLE: millis,red,ir,bpm,spo2,motion
+void PPGManager_setMotion(bool moving);
 
 
 #endif
