@@ -103,6 +103,18 @@ void loop() {
     DeviceStateManager_onEvent(EVT_FALL_DETECTED);
   }
 
+  // Cờ cử động cho từng mẫu PPG khi đang đo (đọc IMU tối đa 10 lần/giây).
+  // Cờ chỉ được gửi kèm để app lưu vào CSV; nó không dừng phép đo.
+  {
+    DeviceMode currentMode = DeviceStateManager_getMode();
+    static unsigned long lastMotionCheck = 0;
+    if ((currentMode == MODE_MEASURE || currentMode == MODE_SCREENING) &&
+        millis() - lastMotionCheck >= 100) {
+      lastMotionCheck = millis();
+      PPGManager_setMotion(AccelManager_isMoving());
+    }
+  }
+
   // Đọc dữ liệu từ hàng đợi FIFO của MAX30102
   PPGManager_process();
 

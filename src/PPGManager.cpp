@@ -36,8 +36,15 @@ static volatile bool noFingerEventFlag = false;
 
 static uint8_t storedMaxPin = 32;
 
+// Cờ cử động hiện tại do vòng lặp chính cập nhật từ IMU (AccelManager_isMoving)
+static volatile bool motionFlag = false;
+
 void PPGManager_handleInterrupt() {
   dataReady = true;
+}
+
+void PPGManager_setMotion(bool moving) {
+  motionFlag = moving;
 }
 
 bool PPGManager_begin(uint8_t interruptPin) {
@@ -169,11 +176,12 @@ void PPGManager_process() {
     } else {
       noFingerStartTime = 0;
 
-      // Đóng gói BLE: millis,red,ir,bpm,spo2 (tương thích format ESP32-C3 & app)
+      // Đóng gói BLE: millis,red,ir,bpm,spo2,motion (app đọc được cả gói 5 cột cũ)
       char tempStr[64];
-      int slen = snprintf(tempStr, sizeof(tempStr), "%lu,%lu,%lu,%u,%u\n",
+      int slen = snprintf(tempStr, sizeof(tempStr), "%lu,%lu,%lu,%u,%u,%u\n",
                           (unsigned long)millis(), (unsigned long)redValue,
-                          (unsigned long)irValue, finalBPM, finalSpO2);
+                          (unsigned long)irValue, finalBPM, finalSpO2,
+                          motionFlag ? 1u : 0u);
       if (slen > 0 && ppgPayloadLen + (size_t)slen < sizeof(ppgPayload)) {
         memcpy(ppgPayload + ppgPayloadLen, tempStr, (size_t)slen + 1);
         ppgPayloadLen += (size_t)slen;
