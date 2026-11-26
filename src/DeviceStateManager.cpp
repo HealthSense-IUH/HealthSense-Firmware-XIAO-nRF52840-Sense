@@ -90,6 +90,15 @@ static const char* DeviceStateManager_emergencyTypeName(EmergencyType type) {
            type == EMERGENCY_SYNCOPE ? "SYNCOPE" : "CARDIAC";
 }
 
+// Hồi phục tim sau tập: trong 10 phút sau WORKOUT_STOP không tự đo / nhận lệnh sàng lọc AFib
+static constexpr unsigned long WORKOUT_COOLDOWN_MS = 600000UL;
+static unsigned long lastWorkoutEndTime = 0;
+static bool workoutPaused = false;
+
+static bool inWorkoutCooldown() {
+    return lastWorkoutEndTime > 0 && (millis() - lastWorkoutEndTime < WORKOUT_COOLDOWN_MS);
+}
+
 // Hàm xử lý lệnh nhận từ điện thoại qua BLE Write (được gọi từ loop chính, an toàn tuyệt đối với I2C và SoftDevice)
 void DeviceStateManager_handleBLECommand(const char* cmd) {
     if (cmd == nullptr || cmd[0] == '\0') return;
@@ -98,8 +107,30 @@ void DeviceStateManager_handleBLECommand(const char* cmd) {
 
     if (strcmp(cmd, "CMD:START_MEASURE") == 0) {
         DeviceStateManager_onEvent(EVT_BLE_START_MEASURE);
-    } else if (strcmp(cmd, "CMD:START_WORKOUT") == 0) {
+    } else if (strcmp(cmd, "CMD:START_WORKOUT") == 0 || strcmp(cmd, "CMD:WORKOUT_START") == 0) {
+        lastWorkoutEndTime = 0;
+        workoutPaused = false;
         DeviceStateManager_onEvent(EVT_BLE_START_WORKOUT);
+    } else if (strcmp(cmd, "CMD:WORKOUT_PAUSE") == 0) {
+        workoutPaused = true;
+        AccelManager_setStepCountingPaused(true);
+        Serial.println("[WORKOUT] Tạm dừng đo nhịp tim & đếm bước");
+        sendBLECommand("ACK:WORKOUT_PAUSE\n");
+    } else if (strcmp(cmd, "CMD:WORKOUT_RESUME") == 0) {
+        workoutPaused = false;
+        AccelManager_setStepCountingPaused(false);
+        if (currentMode != MODE_WORKOUT) {
+            DeviceStateManager_onEvent(EVT_BLE_START_WORKOUT);
+        }
+        Serial.println("[WORKOUT] Tiếp tục đo nhịp tim & đếm bước");
+        sendBLECommand("ACK:WORKOUT_RESUME\n");
+    } else if (strcmp(cmd, "CMD:WORKOUT_STOP") == 0) {
+        workoutPaused = false;
+        AccelManager_stopStepCounting();
+        lastWorkoutEndTime = millis();
+        Serial.println("[WORKOUT] Kết thúc phiên tập luyện, bắt đầu 10 phút hồi phục tim tĩnh");
+        sendBLECommand("ACK:WORKOUT_STOP\n");
+        DeviceStateManager_requestMode(MODE_IDLE);
     } else if (strcmp(cmd, "CMD:START_SCREENING") == 0) {
         DeviceStateManager_onEvent(EVT_BLE_START_SCREENING);
     } else if (strcmp(cmd, "CMD:IDLE") == 0) {
@@ -243,6 +274,16 @@ void DeviceStateManager_onEvent(DeviceEvent event) {
             break;
 
         case EVT_BLE_START_SCREENING:
+            if (currentMode == MODE_WORKOUT) {
+                Serial.println("[WARN] Từ chối đo AFib Screening do đang trong MODE_WORKOUT");
+                sendBLECommand("ERR:WORKOUT_IN_PROGRESS\n");
+                break;
+            }
+            if (inWorkoutCooldown()) {
+                Serial.println("[WARN] Từ chối đo AFib Screening do đang trong 10 phút hồi phục sau tập");
+                sendBLECommand("ERR:WORKOUT_COOLDOWN\n");
+                break;
+            }
             Serial.println("event BLE_START_SCREENING");
             sendBLECommand("CMD:START_SCREENING\n");
             if (currentMode == MODE_SCREENING) {
@@ -272,7 +313,7 @@ void DeviceStateManager_loop() {
     }
 
     if (currentMode == MODE_IDLE) {
-        if (millis() - lastWearCheck >= 4000) {
+        if (!inWorkoutCooldown() && millis() - lastWearCheck >= 4000) {
             lastWearCheck = millis();
 
             PPGManager_wakeUp(MAX30101_INT_PIN);
@@ -507,6 +548,10 @@ DeviceMode DeviceStateManager_getMode() {
     return currentMode;
 }
 
+bool DeviceStateManager_isWorkoutPaused() {
+    return workoutPaused;
+}
+
 static void DeviceStateManager_requestMode(DeviceMode newMode) {
     if (newMode == currentMode || newMode == pendingMode) {
         return;
@@ -538,9 +583,11 @@ static void enterMode(DeviceMode mode) {
 
         case MODE_WORKOUT:
             Serial.println("Mode WORKOUT");
+            workoutPaused = false;
             PPGManager_wakeUp(MAX30101_INT_PIN);
             AccelManager_setMotionThreshold(20);
             AccelManager_startFallDetection();
+            AccelManager_startStepCounting();
             break;
 
         case MODE_SCREENING:
@@ -635,7 +682,11 @@ static void exitMode(DeviceMode mode) {
             break;
 
         case MODE_MEASURE:
+            PPGManager_shutDown();
+            break;
         case MODE_WORKOUT:
+            workoutPaused = false;
+            AccelManager_stopStepCounting();
             PPGManager_shutDown();
             break;
         case MODE_EMERGENCY:

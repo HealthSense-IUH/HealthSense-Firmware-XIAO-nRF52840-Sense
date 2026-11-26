@@ -2,6 +2,7 @@
 #include "LSM6DS3.h"
 #include "Wire.h"
 #include <Arduino.h>
+#include <math.h>
 
 // Khởi tạo đối tượng cảm biến (I2C mặc định)
 LSM6DS3 myIMU(I2C_MODE, 0x6A); 
@@ -49,6 +50,20 @@ static constexpr int16_t FALL_SATURATION_THRESH = 28000;
 static constexpr int32_t FALL_MOTION_DELTA_THRESH_RAW = 2500; // ~0.15g (2500 / 16384)
 static constexpr uint8_t FALL_MOTION_STREAK_THRESH = 4;       // Cần cử động liên tục >= 4 mẫu (~200ms) mới hủy
 static uint8_t fallMotionStreak = 0;
+
+// --- BỘ ĐẾM BƯỚC CHÂN CHO CHẾ ĐỘ WORKOUT (25 Hz trên LSM6DS3TR-C ±2g) ---
+static constexpr unsigned long PEDOMETER_SAMPLE_INTERVAL_MS = 40UL; // 25 Hz
+static constexpr unsigned long STEP_MIN_INTERVAL_MS = 270UL;        // Tối đa ~222 bước/phút
+static constexpr unsigned long STEP_TROUGH_TIMEOUT_MS = 1200UL;
+static constexpr float STEP_PEAK_G = 1.20f;
+static constexpr float STEP_TROUGH_G = 1.03f;
+static bool stepCountingActive = false;
+static bool stepCountingPaused = false;
+static uint32_t workoutStepCount = 0;
+static unsigned long lastPedometerSampleMs = 0;
+static unsigned long lastStepDetectedMs = 0;
+static float smoothedAccelG = 1.0f;
+static bool waitingForStepTrough = false;
 
 static void AccelManager_handleInterrupt() {
   imuInterruptFlag = true;
@@ -179,6 +194,32 @@ void AccelManager_process() {
         fallState = FALL_STATE_WAIT_IMPACT;
         fallStateStartMs = millis();
         Serial.println("[ACCEL] Giai doan 1: Free-fall detected -> Cho va cham (WAIT_IMPACT)");
+      }
+    }
+  }
+
+  // 1b. Đếm bước chân 25Hz khi đang ở MODE_WORKOUT (không chạy lúc IDLE/SCREENING/EMERGENCY để tiết kiệm pin & I2C)
+  if (stepCountingActive && !stepCountingPaused && fallState == FALL_STATE_IDLE) {
+    unsigned long nowStep = millis();
+    if (nowStep - lastPedometerSampleMs >= PEDOMETER_SAMPLE_INTERVAL_MS) {
+      lastPedometerSampleMs = nowStep;
+      float ax = (float)myIMU.readRawAccelX() / 16384.0f;
+      float ay = (float)myIMU.readRawAccelY() / 16384.0f;
+      float az = (float)myIMU.readRawAccelZ() / 16384.0f;
+      float rawG = sqrtf(ax * ax + ay * ay + az * az);
+      smoothedAccelG = smoothedAccelG * 0.65f + rawG * 0.35f;
+
+      if (!waitingForStepTrough) {
+        if (smoothedAccelG > STEP_PEAK_G) {
+          unsigned long dt = nowStep - lastStepDetectedMs;
+          if (lastStepDetectedMs == 0 || dt >= STEP_MIN_INTERVAL_MS) {
+            workoutStepCount++;
+            lastStepDetectedMs = nowStep;
+            waitingForStepTrough = true;
+          }
+        }
+      } else if (smoothedAccelG < STEP_TROUGH_G || (nowStep - lastStepDetectedMs) > STEP_TROUGH_TIMEOUT_MS) {
+        waitingForStepTrough = false;
       }
     }
   }
@@ -364,4 +405,29 @@ void AccelManager_clearInterruptLatch() {
   if (!imuReady) return;
   uint8_t dummy = 0;
   myIMU.readRegister(&dummy, LSM6DS3_WAKE_UP_SRC_REG);
+}
+
+void AccelManager_startStepCounting() {
+  workoutStepCount = 0;
+  lastPedometerSampleMs = 0;
+  lastStepDetectedMs = 0;
+  smoothedAccelG = 1.0f;
+  waitingForStepTrough = false;
+  stepCountingPaused = false;
+  stepCountingActive = true;
+}
+
+void AccelManager_setStepCountingPaused(bool paused) {
+  stepCountingPaused = paused;
+  waitingForStepTrough = false;
+}
+
+void AccelManager_stopStepCounting() {
+  stepCountingActive = false;
+  stepCountingPaused = false;
+  waitingForStepTrough = false;
+}
+
+uint32_t AccelManager_getStepCount() {
+  return workoutStepCount;
 }

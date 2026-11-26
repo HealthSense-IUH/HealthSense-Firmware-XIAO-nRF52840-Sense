@@ -126,16 +126,22 @@ void loop() {
   DeviceMode mode = DeviceStateManager_getMode();
 
   if (mode == MODE_WORKOUT) {
-    // Chế độ tập luyện (Workout): Chỉ gửi nhịp tim/SpO2 trung bình mỗi 1 giây
+    // Chế độ tập luyện (Workout): Gửi BPM + tổng số bước chân mỗi 2 giây (định dạng W:millis,bpm,steps khớp Mobile & ESP32-C3)
     static unsigned long lastVitalsSend = 0;
-    if (millis() - lastVitalsSend >= 1000 && BLEManager_isConnected()) {
+    if (!DeviceStateManager_isWorkoutPaused() &&
+        millis() - lastVitalsSend >= 2000 &&
+        BLEManager_isConnected()) {
       lastVitalsSend = millis();
       char buf[64];
-      size_t len = (size_t)snprintf(buf, sizeof(buf), "W:%lu,%u,%u\n",
-                                    millis(), PPGManager_getBPM(), PPGManager_getSpO2());
-      BLEManager_notifyReport(buf, len);
+      int slen = snprintf(buf, sizeof(buf), "W:%lu,%u,%lu\n",
+                          (unsigned long)millis(),
+                          (unsigned int)PPGManager_getBPM(),
+                          (unsigned long)AccelManager_getStepCount());
+      if (slen > 0) {
+        BLEManager_notifyReport(buf, (size_t)slen);
+      }
     }
-    // Giải phóng buffer tránh tràn bộ nhớ (giống ESP32-C3 dùng discardPacket)
+    // Giải phóng buffer PPG thô tránh tràn bộ nhớ (không stream PPG thô khi đang vận động)
     PPGManager_discardPacket();
 
   } else if (mode == MODE_MEASURE || mode == MODE_SCREENING) {

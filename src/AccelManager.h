@@ -18,4 +18,10 @@ void AccelManager_stopFallDetection();
 bool AccelManager_readFreeFallInterrupt();
 void AccelManager_clearInterruptLatch();
 
+// Đếm bước chân trong chế độ tập luyện (MODE_WORKOUT)
+void AccelManager_startStepCounting();
+void AccelManager_setStepCountingPaused(bool paused);
+void AccelManager_stopStepCounting();
+uint32_t AccelManager_getStepCount();
+
 #endif

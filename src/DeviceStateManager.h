@@ -36,3 +36,4 @@ void DeviceStateManager_onEvent(DeviceEvent event);
 void DeviceStateManager_loop();
 DeviceMode DeviceStateManager_getMode();
 uint8_t DeviceStateManager_getScreeningPhase();
+bool DeviceStateManager_isWorkoutPaused();
