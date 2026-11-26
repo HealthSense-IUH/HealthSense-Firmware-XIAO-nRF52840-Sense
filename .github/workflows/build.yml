@@ -1,0 +1,55 @@
+name: Firmware Build
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  BUILD_DIR: .pio/build/xiao_nrf52840_sense
+
+jobs:
+  build:
+    name: PlatformIO Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO toolchain and libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: python -m pip install 'platformio==6.2.0'
+
+      - name: Build firmware
+        run: pio run
+
+      # Same command as README "Cách 2", using the uf2conv.py bundled with the Adafruit nRF52 core.
+      - name: Create UF2 image
+        run: >
+          python ~/.platformio/packages/framework-arduinoadafruitnrf52/tools/uf2conv/uf2conv.py
+          "$BUILD_DIR/firmware.hex" -c -f 0xADA52840 -o "$BUILD_DIR/firmware.uf2"
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            ${{ env.BUILD_DIR }}/firmware.hex
+            ${{ env.BUILD_DIR }}/firmware.zip
+            ${{ env.BUILD_DIR }}/firmware.uf2
+          if-no-files-found: error
