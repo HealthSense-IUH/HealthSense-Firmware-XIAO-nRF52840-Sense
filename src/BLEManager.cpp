@@ -119,7 +119,7 @@ void BLEManager_begin() {
   uint8_t mac[6];
   Bluefruit.getAddr(mac);
   static char deviceName[20];
-  sprintf(deviceName, "HuyWatch_%02X%02X", mac[1], mac[0]);
+  snprintf(deviceName, sizeof(deviceName), "HuyWatch_%02X%02X", mac[1], mac[0]);
   Bluefruit.setName(deviceName);
 
   // Set Callbacks kết nối
