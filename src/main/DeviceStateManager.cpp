@@ -15,9 +15,8 @@ static constexpr uint8_t EMERGENCY_NO_FINGER_CONFIRM_COUNT = 3;      // cần 3 
 static constexpr unsigned long EMERGENCY_ALERT_INTERVAL_MS = 2000UL; // tần suất tối đa của SOS:ALERT
 
 // Thời lượng Pha 1 của chế độ Screening (phát PPG thô liên tục).
-// App ghi 72 giây (AI Service bỏ 2 giây đầu rồi chia 70 giây thành 5 cửa sổ 30 s, bước 10 s);
-// cộng thêm 3 giây dự phòng cho độ trễ lệnh BLE và thời điểm app bắt đầu ghi.
-static constexpr unsigned long SCREENING_PHASE1_MS = 75000UL;
+// Đồng bộ 72 giây theo nghiệp vụ gốc của firmware ESP32-C3 (App ghi 72 giây cho AI Service).
+static constexpr unsigned long SCREENING_PHASE1_MS = 72000UL;
 
 enum EmergencyType {
     EMERGENCY_NONE,
@@ -45,7 +44,7 @@ static bool isScreening = false;
 
 // Screening cycle management (10-minute cycle with 2 phases)
 static unsigned long screeningCycleStart = 0;
-// 0: idle, 1: Phase 1 (75 s measure, SCREENING_PHASE1_MS), 2: Phase 1 sleep dynamic, 3: Phase 2 (30s measure), 4: Phase 2 sleep dynamic, 5: Phase 1 micro-retry wait (30s)
+// 0: idle, 1: Phase 1 (72 s measure, SCREENING_PHASE1_MS), 2: Phase 1 sleep dynamic, 3: Phase 2 (30s measure), 4: Phase 2 sleep dynamic, 5: Phase 1 micro-retry wait (30s)
 static uint8_t screeningRetryCount = 0;
 static uint8_t screeningPhase = 0;
 static unsigned long phaseStartTime = 0;
@@ -296,7 +295,7 @@ void DeviceStateManager_loop() {
         unsigned long now = millis();
         
         if (screeningPhase == 1) {
-            // ĐANG ĐO PHA 1 (SCREENING_PHASE1_MS = 75 giây)
+            // ĐANG ĐO PHA 1 (SCREENING_PHASE1_MS = 72 giây)
             // Tích luỹ BPM/SpO2 mỗi 1 giây
             if (now - lastSampleAccumTime >= 1000) {
                 lastSampleAccumTime = now;
@@ -533,6 +532,8 @@ static void enterMode(DeviceMode mode) {
             Serial.println("Mode MEASURE");
             AccelManager_startFallDetection();
             PPGManager_wakeUp(MAX30101_INT_PIN);
+            PPGManager_setupPhase1();
+            PPGManager_discardPacket();
             // Không cần chỉnh ngưỡng gia tốc vì bên nRF52840 không dừng đo khi có chuyển động
             break;
 
