@@ -103,8 +103,8 @@ void loop() {
     DeviceStateManager_onEvent(EVT_FALL_DETECTED);
   }
 
-  // Cờ cử động cho từng mẫu PPG khi đang đo (đọc IMU tối đa 10 lần/giây).
-  // Cờ chỉ được gửi kèm để app lưu vào CSV; nó không dừng phép đo.
+  // Cờ cử động cho từng mẫu PPG khi đang đo (đọc IMU tối đa 10 lần/giây) để app lưu vào CSV.
+  // Riêng trong Pha 1 MODE_SCREENING, AccelManager_process() giám sát cử động tay 20 Hz và kích hoạt EVT_MOTION để dừng đo.
   {
     DeviceMode currentMode = DeviceStateManager_getMode();
     static unsigned long lastMotionCheck = 0;

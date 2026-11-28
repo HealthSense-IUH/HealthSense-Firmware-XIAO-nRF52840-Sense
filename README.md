@@ -21,7 +21,7 @@ Firmware cho thiết bị đeo theo dõi sức khỏe và phát hiện té ngã 
 - **Sàng lọc rung nhĩ (AFib Screening)**:
   - Chu kỳ sàng lọc đa pha kéo dài 10 phút, tự động kích hoạt định kỳ khi người dùng đeo đồng hồ ở trạng thái nghỉ.
   - Pha 1 phát PPG thô liên tục trong **75 giây** (`SCREENING_PHASE1_MS`) để app ghi đủ 72 giây: AI Service bỏ 2 giây đầu rồi chia 70 giây còn lại thành 5 cửa sổ 30 s, bước 10 s.
-  - Mỗi mẫu PPG mang **cờ cử động** từ IMU LSM6DS3TR-C (`AccelManager_isMoving`, đọc tối đa 10 lần/giây). App lưu cờ vào cột `Motion` của CSV; cờ không dừng phép đo.
+  - Mỗi mẫu PPG mang **cờ cử động** từ IMU LSM6DS3TR-C (`AccelManager_isMoving`, đọc tối đa 10 lần/giây) để app lưu vào cột `Motion` của CSV. Đồng thời trong Pha 1, IMU giám sát cử động tay $20\text{ Hz}$ (sau $1.5\text{ s}$ ổn định): nếu phát hiện vung/rung tay (`dynamicG >= 0.22g` hoặc `deltaG >= 0.25g` liên tục $\ge 100\text{ ms}$, hoặc giật mạnh $\ge 0.35g$) sẽ gửi `CMD:MOTION\n` qua BLE, tắt MAX30101 và dừng phiên đo về `MODE_IDLE`.
 - **Chế độ tập luyện (Workout Mode)**:
   - Đếm bước chân thông minh bằng thuật toán nhận diện đỉnh gia tốc $25\text{ Hz}$.
   - Gói tin gọn nhẹ gửi định kỳ mỗi $1 - 3\text{ giây}$ lên ứng dụng di động.
@@ -78,6 +78,7 @@ Thiết bị sử dụng vi điều khiển **Nordic nRF52840** (ARM Cortex-M4F 
 | **Watch $\rightarrow$ App** | `SOS:CANCELLED[,reason]\n` | Báo hủy SOS (lý do: `BUTTON`, `NO_WEAR` hoặc từ app) |
 | **Watch $\rightarrow$ App** | `W:<timestamp>,<bpm>,<steps>\n`| Báo cáo nhịp tim và bước chân định kỳ trong chế độ tập luyện |
 | **Watch $\rightarrow$ App** (DATA) | `<millis>,<red>,<ir>,<bpm>,<spo2>,<motion>\n` | Mẫu PPG thô ở chế độ Measure/Screening (gom 5 mẫu/gói); `motion` = 1 khi IMU phát hiện cử động |
+| **Watch $\rightarrow$ App** (DATA) | `CMD:MOTION\n` | Báo phát hiện cử động tay khi đang đo tầm soát (Pha 1 bị hủy, app dừng ghi PPG) |
 
 ---
 

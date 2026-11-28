@@ -18,6 +18,10 @@ void AccelManager_stopFallDetection();
 bool AccelManager_readFreeFallInterrupt();
 void AccelManager_clearInterruptLatch();
 
+// Phát hiện cử động tay khi đang đo sàng lọc AFib (Pha 1) để dừng đo tránh nhiễu PPG
+void AccelManager_startScreeningMotion();
+void AccelManager_stopScreeningMotion();
+
 // Đếm bước chân trong chế độ tập luyện (MODE_WORKOUT)
 void AccelManager_startStepCounting();
 void AccelManager_setStepCountingPaused(bool paused);

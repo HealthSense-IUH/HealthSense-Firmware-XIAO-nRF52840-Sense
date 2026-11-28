@@ -228,9 +228,23 @@ void DeviceStateManager_onEvent(DeviceEvent event) {
             break;
 
         case EVT_MOTION:
-            // Cảm biến gia tốc không còn ảnh hưởng đến việc đo trên nRF52840.
-            // Chỉ log để debug, không dừng / đổi chế độ nào cả.
-            Serial.printf("[%lu] event MOTION (bỏ qua - không ảnh hưởng đo)\n", (unsigned long)millis());
+            if (currentMode != MODE_MEASURE && currentMode != MODE_SCREENING) break;
+            Serial.printf("[%lu] event MOTION, detected arm motion\n", (unsigned long)millis());
+            sendBLECommand("CMD:MOTION\n");
+            if (currentMode == MODE_MEASURE) {
+                // Đo tức thời (Spot-check): gửi thông báo rung tay nhưng không ngắt đo về IDLE
+                // để cảm biến tiếp tục đọc khi tay người dùng yên tĩnh trở lại
+            } else {
+                // Đang sàng lọc AFib (MODE_SCREENING): hủy phiên đo Pha 1 do nhiễu chuyển động và về IDLE
+                if (screeningPhase == 1) {
+                    Serial.println("[SCREENING] Phát hiện chuyển động tay! Hủy phiên đo Pha 1...");
+                    PPGManager_shutDown();
+                    AccelManager_stopScreeningMotion();
+                    screeningPhase = 0;
+                    screeningRetryCount = 0;
+                }
+                DeviceStateManager_requestMode(MODE_IDLE);
+            }
             break;
 
         case EVT_NOT_WEARING:
@@ -353,6 +367,7 @@ void DeviceStateManager_loop() {
             // Đã đo đủ thời lượng Pha 1 liên tục
             if (now - phaseStartTime >= SCREENING_PHASE1_MS) {
                 PPGManager_shutDown();
+                AccelManager_stopScreeningMotion();
                 
                 uint8_t avgBPM = 0;
                 uint8_t avgSpO2 = 0;
@@ -411,6 +426,7 @@ void DeviceStateManager_loop() {
                     
                     PPGManager_wakeUp(MAX30101_INT_PIN);
                     PPGManager_setupPhase1();
+                    AccelManager_startScreeningMotion();
                 }
             }
         }
@@ -538,6 +554,7 @@ void DeviceStateManager_loop() {
                 
                 PPGManager_wakeUp(MAX30101_INT_PIN);
                 PPGManager_setupPhase1();
+                AccelManager_startScreeningMotion();
             }
         }
     }
@@ -609,7 +626,7 @@ static void enterMode(DeviceMode mode) {
             
             PPGManager_wakeUp(MAX30101_INT_PIN);
             PPGManager_setupPhase1();
-            // Không cần chỉnh ngưỡng gia tốc vì bên nRF52840 không dừng đo khi có chuyển động
+            AccelManager_startScreeningMotion();
             break;
 
         case MODE_SHUTDOWN:
@@ -674,6 +691,7 @@ static void exitMode(DeviceMode mode) {
         case MODE_SCREENING:
             screeningStartTime = 0;
             screeningPhase = 0;
+            AccelManager_stopScreeningMotion();
             PPGManager_shutDown();
             break;
 

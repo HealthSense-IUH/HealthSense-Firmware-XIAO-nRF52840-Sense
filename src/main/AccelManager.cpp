@@ -23,6 +23,25 @@ static constexpr uint8_t LSM6DS3_TAP_CFG1_VALUE = 0x81;
 static constexpr int32_t MOTION_DELTA_RAW = 2000;
 static constexpr unsigned long MOTION_HOLD_MS = 1500UL;
 
+// --- GIÁM SÁT CỬ ĐỘNG TAY TRONG PHA 1 SÀNG LỌC AFIB (20 Hz trên LSM6DS3TR-C ±2g) ---
+// Chờ 1.5s ổn định sau khi bắt đầu đo (tránh hủy nhầm lúc người dùng vừa bấm điện thoại đặt tay xuống).
+// Khi gia tốc động > 0.22g hoặc xoay cổ tay delta > 0.25g liên tiếp >= 2 mẫu (~100ms),
+// hoặc giật mạnh > 0.35g -> bật cờ isMoving để dừng phiên đo và báo CMD:MOTION lên app.
+static constexpr unsigned long SCREENING_MOTION_SAMPLE_MS = 50UL;     // 20 Hz
+static constexpr unsigned long SCREENING_MOTION_SETTLE_MS = 1500UL;   // Chờ đặt tay ổn định
+static constexpr float SCREENING_DYNAMIC_G_THRESH = 0.22f;            // ~2.16 m/s² (khớp ESP32-C3)
+static constexpr float SCREENING_SPIKE_G_THRESH = 0.35f;              // Giật/vung mạnh tức thời
+static constexpr float SCREENING_DELTA_G_THRESH = 0.25f;              // Xoay / nghiêng cổ tay
+static constexpr uint8_t SCREENING_MOTION_STREAK_THRESH = 2;          // ~100ms liên tục
+static bool screeningMotionArmed = false;
+static unsigned long screeningMotionArmedAt = 0;
+static unsigned long screeningMotionLastSampleMs = 0;
+static bool screeningMotionHasPrev = false;
+static float screeningPrevAx = 0.0f;
+static float screeningPrevAy = 0.0f;
+static float screeningPrevAz = 0.0f;
+static uint8_t screeningMotionStreak = 0;
+
 // --- 3-STAGE FALL VERIFICATION FSM ---
 // Giai đoạn 1: Free-fall (Phần cứng INT1 bắt rơi tự do)
 // Giai đoạn 2: Impact (Gia tốc tổng >= 1.8g hoặc bão hòa cảm biến trong vòng 600ms sau rơi)
@@ -198,7 +217,50 @@ void AccelManager_process() {
     }
   }
 
-  // 1b. Đếm bước chân 25Hz khi đang ở MODE_WORKOUT (không chạy lúc IDLE/SCREENING/EMERGENCY để tiết kiệm pin & I2C)
+  // 1b. Giám sát cử động tay khi đang đo sàng lọc AFib Pha 1 (không ảnh hưởng ngắt INT1 té ngã)
+  if (screeningMotionArmed && fallState == FALL_STATE_IDLE) {
+    unsigned long nowScr = millis();
+    if (nowScr - screeningMotionLastSampleMs >= SCREENING_MOTION_SAMPLE_MS) {
+      screeningMotionLastSampleMs = nowScr;
+      float ax = (float)myIMU.readRawAccelX() / 16384.0f;
+      float ay = (float)myIMU.readRawAccelY() / 16384.0f;
+      float az = (float)myIMU.readRawAccelZ() / 16384.0f;
+
+      if ((nowScr - screeningMotionArmedAt) < SCREENING_MOTION_SETTLE_MS || !screeningMotionHasPrev) {
+        screeningPrevAx = ax;
+        screeningPrevAy = ay;
+        screeningPrevAz = az;
+        screeningMotionHasPrev = true;
+        screeningMotionStreak = 0;
+      } else {
+        float magG = sqrtf(ax * ax + ay * ay + az * az);
+        float dynamicG = fabsf(magG - 1.0f);
+        float deltaG = fabsf(ax - screeningPrevAx) +
+                       fabsf(ay - screeningPrevAy) +
+                       fabsf(az - screeningPrevAz);
+        screeningPrevAx = ax;
+        screeningPrevAy = ay;
+        screeningPrevAz = az;
+
+        if (dynamicG >= SCREENING_SPIKE_G_THRESH) {
+          isMoving = true;
+          screeningMotionStreak = 0;
+          Serial.printf("[ACCEL] Screening motion spike: dynamicG=%.2fg deltaG=%.2fg\n", dynamicG, deltaG);
+        } else if (dynamicG >= SCREENING_DYNAMIC_G_THRESH || deltaG >= SCREENING_DELTA_G_THRESH) {
+          screeningMotionStreak++;
+          if (screeningMotionStreak >= SCREENING_MOTION_STREAK_THRESH) {
+            isMoving = true;
+            screeningMotionStreak = 0;
+            Serial.printf("[ACCEL] Screening motion sustained: dynamicG=%.2fg deltaG=%.2fg\n", dynamicG, deltaG);
+          }
+        } else {
+          screeningMotionStreak = 0;
+        }
+      }
+    }
+  }
+
+  // 1c. Đếm bước chân 25Hz khi đang ở MODE_WORKOUT (không chạy lúc IDLE/SCREENING/EMERGENCY để tiết kiệm pin & I2C)
   if (stepCountingActive && !stepCountingPaused && fallState == FALL_STATE_IDLE) {
     unsigned long nowStep = millis();
     if (nowStep - lastPedometerSampleMs >= PEDOMETER_SAMPLE_INTERVAL_MS) {
@@ -405,6 +467,23 @@ void AccelManager_clearInterruptLatch() {
   if (!imuReady) return;
   uint8_t dummy = 0;
   myIMU.readRegister(&dummy, LSM6DS3_WAKE_UP_SRC_REG);
+}
+
+void AccelManager_startScreeningMotion() {
+  screeningMotionArmed = true;
+  screeningMotionArmedAt = millis();
+  screeningMotionLastSampleMs = 0;
+  screeningMotionHasPrev = false;
+  screeningMotionStreak = 0;
+  noInterrupts();
+  isMoving = false;
+  interrupts();
+}
+
+void AccelManager_stopScreeningMotion() {
+  screeningMotionArmed = false;
+  screeningMotionHasPrev = false;
+  screeningMotionStreak = 0;
 }
 
 void AccelManager_startStepCounting() {
