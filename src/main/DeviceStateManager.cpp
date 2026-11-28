@@ -578,6 +578,8 @@ static void enterMode(DeviceMode mode) {
             Serial.println("Mode MEASURE");
             AccelManager_startFallDetection();
             PPGManager_wakeUp(MAX30101_INT_PIN);
+            PPGManager_setupPhase1();
+            PPGManager_discardPacket();
             // Không cần chỉnh ngưỡng gia tốc vì bên nRF52840 không dừng đo khi có chuyển động
             break;
 
