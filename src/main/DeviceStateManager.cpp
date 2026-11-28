@@ -294,9 +294,10 @@ void DeviceStateManager_onEvent(DeviceEvent event) {
                 break;
             }
             if (inWorkoutCooldown()) {
-                Serial.println("[WARN] Từ chối đo AFib Screening do đang trong 10 phút hồi phục sau tập");
-                sendBLECommand("ERR:WORKOUT_COOLDOWN\n");
-                break;
+                // Cho phép người dùng chủ động đo ngay sau khi xác nhận cảnh báo trên app
+                // (chỉ chặn tự động đo nền ở idleLoop trong 10 phút hồi phục)
+                Serial.println("[INFO] Người dùng chủ động bỏ qua cooldown 10 phút để đo AFib Screening ngay");
+                lastWorkoutEndTime = 0;
             }
             Serial.println("event BLE_START_SCREENING");
             sendBLECommand("CMD:START_SCREENING\n");
